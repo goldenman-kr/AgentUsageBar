@@ -1,0 +1,86 @@
+name: ClaudeUsage
+options:
+  bundleIdPrefix: com.hubinsoft
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  ClaudeUsageCore:
+    path: Packages/ClaudeUsageCore
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Pick your team in Xcode → Signing & Capabilities (one-time) for both targets,
+    # or pass DEVELOPMENT_TEAM=XXXX to xcodebuild.
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+    GENERATE_INFOPLIST_FILE: NO
+
+targets:
+  # ----------------------------------------------------------------------------
+  # Menu-bar app (data owner): reads the Keychain token, fetches usage every 60s,
+  # writes the snapshot to the App Group, and reloads the widget.
+  # ----------------------------------------------------------------------------
+  ClaudeUsageBar:
+    type: application
+    platform: macOS
+    sources:
+      - App/ClaudeUsageBar
+    dependencies:
+      - package: ClaudeUsageCore
+        product: ClaudeUsageCore
+      - package: ClaudeUsageCore
+        product: ClaudeUsageUI
+      - target: ClaudeUsageWidget
+        embed: true
+    info:
+      path: App/ClaudeUsageBar/Info.plist
+      properties:
+        CFBundleDisplayName: Claude 사용량
+        CFBundleName: ClaudeUsageBar
+        LSUIElement: true                 # menu-bar agent: no Dock icon
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: ""
+        # Team-ID-prefixed App Group id (required on macOS); read at runtime by
+        # SharedStore. Expanded from the signing team at build time.
+        AppGroupIdentifier: "group.$(DEVELOPMENT_TEAM).com.hubinsoft.claudeusage"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hubinsoft.ClaudeUsageBar
+        PRODUCT_NAME: ClaudeUsageBar
+        CODE_SIGN_ENTITLEMENTS: App/ClaudeUsageBar/ClaudeUsageBar.entitlements
+        MARKETING_VERSION: "1.0.0"
+
+  # ----------------------------------------------------------------------------
+  # WidgetKit extension (data reader): renders the persisted snapshot. No network,
+  # no Keychain — purely reads the App Group file the app writes.
+  # ----------------------------------------------------------------------------
+  ClaudeUsageWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Widget/ClaudeUsageWidget
+    dependencies:
+      - package: ClaudeUsageCore
+        product: ClaudeUsageCore
+      - package: ClaudeUsageCore
+        product: ClaudeUsageUI
+    info:
+      path: Widget/ClaudeUsageWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Claude 사용량
+        CFBundleName: ClaudeUsageWidget
+        AppGroupIdentifier: "group.$(DEVELOPMENT_TEAM).com.hubinsoft.claudeusage"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hubinsoft.ClaudeUsageBar.Widget
+        PRODUCT_NAME: ClaudeUsageWidget
+        CODE_SIGN_ENTITLEMENTS: Widget/ClaudeUsageWidget/ClaudeUsageWidget.entitlements
+        MARKETING_VERSION: "1.0.0"

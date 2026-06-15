@@ -1,0 +1,43 @@
+# ─── Generated project (regenerate with `xcodegen generate`) ───────────────
+*.xcodeproj/
+
+# ─── Build output (large, machine-specific; leaks absolute /Users paths) ────
+build/
+build-*/
+.build/
+DerivedData/
+*.o
+*.swiftmodule
+*.swiftdoc
+
+# ─── Xcode user state ──────────────────────────────────────────────────────
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.moved-aside
+*.xccheckout
+
+# ─── Swift Package Manager ─────────────────────────────────────────────────
+.swiftpm/
+
+# ─── Signing material & secrets (NEVER commit) ─────────────────────────────
+*.p12
+*.pfx
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+.env
+*.env
+secrets*.plist
+*.local.xcconfig
+
+# ─── macOS ─────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# ─── Logs / temp ───────────────────────────────────────────────────────────
+*.log

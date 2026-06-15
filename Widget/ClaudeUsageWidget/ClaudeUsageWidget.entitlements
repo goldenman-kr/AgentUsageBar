@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Widget extensions are always sandboxed; the App Group grants read access
+         to the snapshot the menu-bar app writes. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.$(DEVELOPMENT_TEAM).com.hubinsoft.claudeusage</string>
+    </array>
+</dict>
+</plist>
