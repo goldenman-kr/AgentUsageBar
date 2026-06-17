@@ -17,13 +17,22 @@ public enum CodexLocalUsageStore {
             .appendingPathComponent(".codex/logs_2.sqlite")
     }
 
+    public static func defaultLogURLs() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home.appendingPathComponent(".codex/logs_2.sqlite"),
+            home.appendingPathComponent(".codex/sqlite/logs_2.sqlite")
+        ]
+    }
+
     public static func loadSummary(
         stateURL: URL = defaultStateURL(),
         logsURL: URL = defaultLogsURL(),
         sessionsURL: URL = defaultSessionsURL(),
         now: Date = Date()
     ) throws -> CodexUsageSummary {
-        if let status = try? loadStatusSummary(logsURL: logsURL, now: now) {
+        let logURLs = logsURL == defaultLogsURL() ? defaultLogURLs() : [logsURL]
+        if let status = try? loadStatusSummary(logsURLs: logURLs, now: now) {
             return status
         }
         if let rateLimit = try? loadRateLimitSummary(sessionsURL: sessionsURL, now: now) {
@@ -35,6 +44,25 @@ public enum CodexLocalUsageStore {
     public static func loadStatusSummary(
         logsURL: URL = defaultLogsURL(),
         now: Date = Date()
+    ) throws -> CodexUsageSummary {
+        let logURLs = logsURL == defaultLogsURL() ? defaultLogURLs() : [logsURL]
+        return try loadStatusSummary(logsURLs: logURLs, now: now)
+    }
+
+    public static func loadStatusSummary(
+        logsURLs: [URL],
+        now: Date = Date()
+    ) throws -> CodexUsageSummary {
+        let summaries = logsURLs.compactMap { try? loadLatestStatusSummary(logsURL: $0, now: now) }
+        if let latest = summaries.max(by: { ($0.periodEnd ?? .distantPast) < ($1.periodEnd ?? .distantPast) }) {
+            return latest
+        }
+        throw UsageError.decoding("Codex /status rate limit 이벤트를 찾을 수 없습니다.")
+    }
+
+    private static func loadLatestStatusSummary(
+        logsURL: URL,
+        now: Date
     ) throws -> CodexUsageSummary {
         guard FileManager.default.fileExists(atPath: logsURL.path) else {
             throw UsageError.tokenNotFound
@@ -275,7 +303,12 @@ public enum CodexLocalUsageStore {
     }
 
     private static func jsonObjectEmbedded(in text: String) -> [String: Any]? {
-        guard let start = text.firstIndex(of: "{") else { return nil }
+        let marker = #""codex.rate_limits""#
+        let markerRange = text.range(of: marker)
+        let searchEnd = markerRange?.lowerBound ?? text.endIndex
+        let prefix = text[..<searchEnd]
+        let start = prefix.lastIndex(of: "{") ?? text.firstIndex(of: "{")
+        guard let start else { return nil }
         let json = String(text[start...])
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

@@ -36,6 +36,7 @@ struct PopoverView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: Header

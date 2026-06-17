@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import ClaudeUsageCore
 
 final class ClaudeUsageCoreTests: XCTestCase {
@@ -223,6 +224,47 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertEqual(summary.rateLimitPlanType, "prolite")
     }
 
+    func testCodexStatusRateLimitLogParsingSkipsTelemetryBraces() throws {
+        let body = """
+        session_loop{thread_id=abc}:turn{model=gpt-5.5}: websocket event: {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"allowed":true,"limit_reached":false,"primary":{"used_percent":4,"window_minutes":300,"reset_after_seconds":16275,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_after_seconds":73873,"reset_at":1781748009}},"additional_rate_limits":{},"credits":null,"promo":null}
+        """
+        let timestamp = Date(timeIntervalSince1970: 1_781_700_000)
+
+        let summary = try XCTUnwrap(CodexLocalUsageStore.parseStatusLogBody(body, timestamp: timestamp))
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 4)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 78)
+        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
+    }
+
+    func testCodexStatusSummaryChoosesNewestLogDatabase() throws {
+        let oldDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("sqlite")
+        let newDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("sqlite")
+        defer {
+            try? FileManager.default.removeItem(at: oldDB)
+            try? FileManager.default.removeItem(at: newDB)
+        }
+
+        try Self.makeCodexLogDB(
+            at: oldDB,
+            timestamp: 1_781_672_000,
+            body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":27,"window_minutes":300,"reset_at":1781672408},"secondary":{"used_percent":76,"window_minutes":10080,"reset_at":1781748009}}}"#
+        )
+        try Self.makeCodexLogDB(
+            at: newDB,
+            timestamp: 1_781_700_000,
+            body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":4,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_at":1781748009}}}"#
+        )
+
+        let summary = try CodexLocalUsageStore.loadStatusSummary(logsURLs: [oldDB, newDB])
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 4)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 78)
+        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
+    }
+
     func testFractionClamping() {
         XCTAssertEqual(Metric(utilization: 150, resetsAt: nil).fraction, 1.0)
         XCTAssertEqual(Metric(utilization: -5, resetsAt: nil).fraction, 0.0)
@@ -305,5 +347,20 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertEqual(decoded.weeklyAll.utilization, 11)
         XCTAssertEqual(decoded.extra?.usedCredits, 3.5)
         XCTAssertEqual(decoded.planLabel, "Max (20x)")
+    }
+
+    private static func makeCodexLogDB(at url: URL, timestamp: Int64, body: String) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE logs (ts INTEGER, ts_nanos INTEGER, feedback_log_body TEXT)", nil, nil, nil), SQLITE_OK)
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, "INSERT INTO logs (ts, ts_nanos, feedback_log_body) VALUES (?, 0, ?)", -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, timestamp)
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, 2, body, -1, transient)
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_DONE)
     }
 }
