@@ -14,8 +14,6 @@ public enum CodexStatusCommand {
             "exec",
             "--json",
             "--skip-git-repo-check",
-            "--ignore-rules",
-            "--ignore-user-config",
             "-s", "read-only",
             prompt
         ]

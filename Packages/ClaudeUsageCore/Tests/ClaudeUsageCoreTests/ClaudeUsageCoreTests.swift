@@ -265,6 +265,32 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
     }
 
+    func testCodexStatusSummaryKeepsHighestUsageInSameWindow() throws {
+        let db = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("sqlite")
+        defer { try? FileManager.default.removeItem(at: db) }
+
+        try Self.makeCodexLogDB(
+            at: db,
+            entries: [
+                (
+                    timestamp: 1_781_700_000,
+                    body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":8,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":79,"window_minutes":10080,"reset_at":1781748009}}}"#
+                ),
+                (
+                    timestamp: 1_781_700_020,
+                    body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":4,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_at":1781748009}}}"#
+                )
+            ]
+        )
+
+        let summary = try CodexLocalUsageStore.loadStatusSummary(logsURL: db)
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 8)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 79)
+        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
+    }
+
     func testFractionClamping() {
         XCTAssertEqual(Metric(utilization: 150, resetsAt: nil).fraction, 1.0)
         XCTAssertEqual(Metric(utilization: -5, resetsAt: nil).fraction, 0.0)
@@ -350,17 +376,24 @@ final class ClaudeUsageCoreTests: XCTestCase {
     }
 
     private static func makeCodexLogDB(at url: URL, timestamp: Int64, body: String) throws {
+        try makeCodexLogDB(at: url, entries: [(timestamp: timestamp, body: body)])
+    }
+
+    private static func makeCodexLogDB(at url: URL, entries: [(timestamp: Int64, body: String)]) throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
         defer { sqlite3_close(db) }
 
         XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE logs (ts INTEGER, ts_nanos INTEGER, feedback_log_body TEXT)", nil, nil, nil), SQLITE_OK)
-        var stmt: OpaquePointer?
-        XCTAssertEqual(sqlite3_prepare_v2(db, "INSERT INTO logs (ts, ts_nanos, feedback_log_body) VALUES (?, 0, ?)", -1, &stmt, nil), SQLITE_OK)
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, timestamp)
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        sqlite3_bind_text(stmt, 2, body, -1, transient)
-        XCTAssertEqual(sqlite3_step(stmt), SQLITE_DONE)
+        for (index, entry) in entries.enumerated() {
+            var stmt: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(db, "INSERT INTO logs (ts, ts_nanos, feedback_log_body) VALUES (?, ?, ?)", -1, &stmt, nil), SQLITE_OK)
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, entry.timestamp)
+            sqlite3_bind_int64(stmt, 2, Int64(index))
+            let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(stmt, 3, entry.body, -1, transient)
+            XCTAssertEqual(sqlite3_step(stmt), SQLITE_DONE)
+        }
     }
 }

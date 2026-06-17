@@ -54,7 +54,7 @@ public enum CodexLocalUsageStore {
         now: Date = Date()
     ) throws -> CodexUsageSummary {
         let summaries = logsURLs.compactMap { try? loadLatestStatusSummary(logsURL: $0, now: now) }
-        if let latest = summaries.max(by: { ($0.periodEnd ?? .distantPast) < ($1.periodEnd ?? .distantPast) }) {
+        if let latest = bestStatusSummary(summaries) {
             return latest
         }
         throw UsageError.decoding("Codex /status rate limit 이벤트를 찾을 수 없습니다.")
@@ -88,15 +88,49 @@ public enum CodexLocalUsageStore {
         }
         defer { sqlite3_finalize(stmt) }
 
+        var summaries: [CodexUsageSummary] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let timestamp = Date(timeIntervalSince1970: TimeInterval(sqlite3_column_int64(stmt, 0)))
             guard let cString = sqlite3_column_text(stmt, 1) else { continue }
             let body = String(cString: cString)
             if let summary = parseStatusLogBody(body, timestamp: timestamp, now: now) {
-                return summary
+                summaries.append(summary)
             }
         }
+        if let summary = bestStatusSummary(summaries) {
+            return summary
+        }
         throw UsageError.decoding("Codex /status rate limit 이벤트를 찾을 수 없습니다.")
+    }
+
+    static func bestStatusSummary(_ summaries: [CodexUsageSummary]) -> CodexUsageSummary? {
+        guard !summaries.isEmpty else { return nil }
+        let latestPrimaryReset = summaries
+            .compactMap { $0.primaryRateLimit?.resetsAt }
+            .max()
+
+        let candidates: [CodexUsageSummary]
+        if let latestPrimaryReset {
+            candidates = summaries.filter { $0.primaryRateLimit?.resetsAt == latestPrimaryReset }
+        } else {
+            candidates = summaries
+        }
+
+        return candidates.max { lhs, rhs in
+            let lhsPrimary = lhs.primaryRateLimit?.usedPercent ?? -1
+            let rhsPrimary = rhs.primaryRateLimit?.usedPercent ?? -1
+            if lhsPrimary != rhsPrimary {
+                return lhsPrimary < rhsPrimary
+            }
+
+            let lhsSecondary = lhs.secondaryRateLimit?.usedPercent ?? -1
+            let rhsSecondary = rhs.secondaryRateLimit?.usedPercent ?? -1
+            if lhsSecondary != rhsSecondary {
+                return lhsSecondary < rhsSecondary
+            }
+
+            return (lhs.periodEnd ?? .distantPast) < (rhs.periodEnd ?? .distantPast)
+        }
     }
 
     public static func loadRateLimitSummary(
