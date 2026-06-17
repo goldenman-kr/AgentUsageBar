@@ -23,6 +23,19 @@ public enum ClaudeAPI {
     public static let userAgent = "claude-cli/2.1.177 (external, claude-usage-widget)"
 }
 
+public enum CodexAuth {
+    public static let userAgent = "codex-usage-bar/1.0"
+
+    public static func defaultAuthFileURL() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".codex/auth.json")
+    }
+
+    public static func analyticsUsageURL(workspaceID: String) -> URL {
+        URL(string: "https://api.chatgpt.com/v1/analytics/codex/workspaces/\(workspaceID)/usage")!
+    }
+}
+
 /// Identifiers shared between the menu-bar app and the WidgetKit extension.
 public enum AppGroup {
     /// Info.plist key holding the real App Group id. Both targets set it via a

@@ -31,6 +31,62 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertThrowsError(try KeychainTokenStore.decodeToken(from: json))
     }
 
+    func testDecodeCodexAuthToken() throws {
+        let payload = #"{"exp":1900000000,"https://api.openai.com/auth":{"chatgpt_account_id":"acct_1","chatgpt_plan_type":"plus","organizations":[{"id":"org_1","is_default":true}]},"https://api.openai.com/profile":{"email":"user@example.com"}}"#
+        let encodedPayload = Data(payload.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let jwt = "header.\(encodedPayload).signature"
+        let json = """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "access_token": "\(jwt)",
+            "account_id": "acct_1",
+            "refresh_token": "refresh"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let token = try CodexAuthStore.decodeToken(from: json)
+        XCTAssertEqual(token.accessToken, jwt)
+        XCTAssertEqual(token.accountID, "acct_1")
+        XCTAssertEqual(token.workspaceID, "acct_1")
+        XCTAssertEqual(token.planType, "plus")
+        XCTAssertEqual(token.email, "user@example.com")
+        XCTAssertEqual(token.expiresAt?.timeIntervalSince1970, 1_900_000_000)
+    }
+
+    func testDecodeCodexAuthTokenReadsWorkspaceFromIDToken() throws {
+        let accessPayload = #"{"exp":1900000000,"https://api.openai.com/auth":{"chatgpt_account_id":"acct_1","chatgpt_plan_type":"plus"},"https://api.openai.com/profile":{"email":"user@example.com"}}"#
+        let idPayload = #"{"https://api.openai.com/auth":{"organizations":[{"id":"org_from_id","is_default":true}]}}"#
+        let accessJWT = "header.\(Self.base64URL(accessPayload)).signature"
+        let idJWT = "header.\(Self.base64URL(idPayload)).signature"
+        let json = """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "access_token": "\(accessJWT)",
+            "id_token": "\(idJWT)",
+            "account_id": "acct_1"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let token = try CodexAuthStore.decodeToken(from: json)
+        XCTAssertEqual(token.workspaceID, "acct_1")
+        XCTAssertEqual(token.planType, "plus")
+        XCTAssertEqual(token.email, "user@example.com")
+    }
+
+    private static func base64URL(_ string: String) -> String {
+        Data(string.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
     // MARK: ISO-8601 parsing (microsecond precision + offset)
 
     func testISO8601Microseconds() {
@@ -98,6 +154,73 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertNil(snap.weeklyOpus)
         XCTAssertNil(snap.extra)                          // disabled → dropped
         XCTAssertEqual(snap.fetchedAt, now)
+    }
+
+    func testCodexAnalyticsSummary() throws {
+        let json = """
+        {
+          "data": [
+            { "credits": 1.5, "threads": 2, "turns": 5,
+              "text_input_tokens": 100, "cached_input_tokens": 30, "output_tokens": 25 },
+            { "credits": 2.0, "threads": 1, "turns": 3,
+              "text_input_tokens": 50, "output_tokens": 10 }
+          ]
+        }
+        """.data(using: .utf8)!
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = Date(timeIntervalSince1970: 1_700_100_000)
+
+        let summary = try CodexUsageAPIClient.summarizeAnalytics(
+            data: json,
+            workspaceID: "org_1",
+            start: start,
+            end: end
+        )
+
+        XCTAssertEqual(summary.credits, 3.5)
+        XCTAssertEqual(summary.threads, 3)
+        XCTAssertEqual(summary.turns, 8)
+        XCTAssertEqual(summary.inputTokens, 150)
+        XCTAssertEqual(summary.cachedInputTokens, 30)
+        XCTAssertEqual(summary.outputTokens, 35)
+        XCTAssertEqual(summary.totalTokens, 215)
+    }
+
+    func testCodexRateLimitSnapshotParsing() throws {
+        let line = """
+        {"timestamp":"2026-06-17T01:02:03.000Z","type":"event_msg","payload":{"type":"token_count"},"rate_limits":{"primary":{"used_percent":31.0,"window_minutes":300,"resets_at":1780909040},"secondary":{"used_percent":15.0,"window_minutes":10080,"resets_at":1781143210},"credits":null,"plan_type":"prolite"}}
+        """
+
+        let summary = try XCTUnwrap(CodexLocalUsageStore.parseRateLimitLine(line))
+        XCTAssertEqual(summary.source, "Codex rate limit snapshot")
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 31.0)
+        XCTAssertEqual(summary.primaryRateLimit?.windowMinutes, 300)
+        XCTAssertEqual(summary.primaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_780_909_040)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 15.0)
+        XCTAssertEqual(summary.secondaryRateLimit?.windowMinutes, 10_080)
+        XCTAssertEqual(summary.secondaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_781_143_210)
+        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
+    }
+
+    func testCodexStatusRateLimitLogParsing() throws {
+        let body = """
+        Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"allowed":true,"limit_reached":false,"primary":{"used_percent":27,"window_minutes":300,"reset_after_seconds":1437,"reset_at":1781672408},"secondary":{"used_percent":76,"window_minutes":10080,"reset_after_seconds":77038,"reset_at":1781748009}},"additional_rate_limits":{"GPT-5.3-Codex-Spark":{"allowed":true,"limit_reached":false,"primary":{"used_percent":3,"window_minutes":300,"reset_after_seconds":18000,"reset_at":1781688972},"secondary":{"used_percent":0,"window_minutes":10080,"reset_after_seconds":604800,"reset_at":1782275772}}},"credits":null,"promo":null}
+        """
+        let timestamp = Date(timeIntervalSince1970: 1_781_672_000)
+
+        let summary = try XCTUnwrap(CodexLocalUsageStore.parseStatusLogBody(body, timestamp: timestamp))
+        XCTAssertEqual(summary.source, "Codex /status")
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 27)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 76)
+        let additional = try XCTUnwrap(summary.additionalRateLimits.first)
+        XCTAssertEqual(additional.name, "GPT-5.3-Codex-Spark")
+        XCTAssertEqual(additional.primary?.usedPercent, 3)
+        XCTAssertEqual(additional.primary?.windowMinutes, 300)
+        XCTAssertEqual(additional.primary?.resetsAt?.timeIntervalSince1970, 1_781_688_972)
+        XCTAssertEqual(additional.secondary?.usedPercent, 0)
+        XCTAssertEqual(additional.secondary?.windowMinutes, 10_080)
+        XCTAssertEqual(additional.secondary?.resetsAt?.timeIntervalSince1970, 1_782_275_772)
+        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
     }
 
     func testFractionClamping() {

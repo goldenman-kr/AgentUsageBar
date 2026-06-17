@@ -22,6 +22,21 @@ public enum PlanLabel {
     }
 }
 
+public enum CodexPlanLabel {
+    public static func from(planType: String?) -> String {
+        switch (planType ?? "").lowercased() {
+        case "plus": return "Plus"
+        case "pro": return "Pro"
+        case "team", "business": return "Business"
+        case "enterprise": return "Enterprise"
+        case "free": return "Free"
+        case "go": return "Go"
+        case "api": return "API Key"
+        default: return "Codex"
+        }
+    }
+}
+
 /// Formats reset timestamps to match the desktop app's "사용량" page wording.
 public enum ResetFormatter {
 

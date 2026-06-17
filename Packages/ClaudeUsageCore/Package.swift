@@ -14,7 +14,8 @@ let package = Package(
     targets: [
         // Pure data pipeline: models, Keychain, API client, formatters. No UI.
         .target(
-            name: "ClaudeUsageCore"
+            name: "ClaudeUsageCore",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         // Shared SwiftUI components reused by the menu-bar app and the widget.
         .target(

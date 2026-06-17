@@ -14,8 +14,8 @@ struct ClaudeUsageWidget: Widget {
         StaticConfiguration(kind: AppGroup.widgetKind, provider: Provider()) { entry in
             ClaudeUsageWidgetView(entry: entry)
         }
-        .configurationDisplayName("Claude 사용량")
-        .description("현재 세션과 주간 한도를 표시합니다.")
+        .configurationDisplayName("AgentUsageBar")
+        .description("Claude와 Codex 사용량을 표시합니다.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

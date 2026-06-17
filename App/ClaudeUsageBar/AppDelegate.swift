@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.67percent",
-                                   accessibilityDescription: "Claude 사용량")
+                                   accessibilityDescription: "AI 사용량")
             button.image?.isTemplate = true
             button.imagePosition = .imageLeading
             button.title = " ––"

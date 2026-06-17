@@ -47,8 +47,10 @@ public struct SharedStore {
         }
     }
 
-    public func load() -> UsageSnapshot? {
+    public func load(provider: UsageProvider? = nil) -> UsageSnapshot? {
         guard let url = snapshotURL, let data = try? Data(contentsOf: url) else { return nil }
-        return try? Self.decoder().decode(UsageSnapshot.self, from: data)
+        guard let snapshot = try? Self.decoder().decode(UsageSnapshot.self, from: data) else { return nil }
+        if let provider, snapshot.provider != provider { return nil }
+        return snapshot
     }
 }
