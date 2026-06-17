@@ -12,6 +12,7 @@ public struct CodexUsageAPIClient {
         if token.isExpired {
             throw UsageError.tokenExpired(token.expiresAt ?? now)
         }
+        try? await CodexStatusCommand.refresh()
         if let status = try? CodexLocalUsageStore.loadStatusSummary(now: now) {
             return UsageSnapshot(codex: status, planLabel: CodexPlanLabel.from(planType: token.planType), fetchedAt: now)
         }
