@@ -192,10 +192,6 @@ struct PopoverView: View {
         switch source {
         case "Codex /status":
             return "Codex /status 기준"
-        case "Codex rate limit snapshot":
-            return "마지막 Codex 실행에서 기록된 서버 한도"
-        case "Codex local activity":
-            return "로컬 활동량 기준 · 잔량 아님"
         default:
             return source
         }

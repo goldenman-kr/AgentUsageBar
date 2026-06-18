@@ -1,5 +1,4 @@
 import XCTest
-import SQLite3
 @testable import ClaudeUsageCore
 
 final class ClaudeUsageCoreTests: XCTestCase {
@@ -157,138 +156,67 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertEqual(snap.fetchedAt, now)
     }
 
-    func testCodexAnalyticsSummary() throws {
+    // MARK: Codex usage endpoint (wham/usage — same source as TUI /status)
+
+    func testCodexWhamUsageParsing() throws {
         let json = """
         {
-          "data": [
-            { "credits": 1.5, "threads": 2, "turns": 5,
-              "text_input_tokens": 100, "cached_input_tokens": 30, "output_tokens": 25 },
-            { "credits": 2.0, "threads": 1, "turns": 3,
-              "text_input_tokens": 50, "output_tokens": 10 }
-          ]
+          "plan_type": "prolite",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window":   { "used_percent": 5, "limit_window_seconds": 18000,  "reset_after_seconds": 11744, "reset_at": 1781785217 },
+            "secondary_window": { "used_percent": 3, "limit_window_seconds": 604800, "reset_after_seconds": 562543, "reset_at": 1782336016 }
+          },
+          "additional_rate_limits": [
+            {
+              "limit_name": "GPT-5.3-Codex-Spark",
+              "metered_feature": "codex_bengalfox",
+              "rate_limit": {
+                "primary_window":   { "used_percent": 7, "limit_window_seconds": 18000,  "reset_at": 1781791473 },
+                "secondary_window": { "used_percent": 0, "limit_window_seconds": 604800, "reset_at": 1782378273 }
+              }
+            }
+          ],
+          "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
         }
         """.data(using: .utf8)!
-        let start = Date(timeIntervalSince1970: 1_700_000_000)
-        let end = Date(timeIntervalSince1970: 1_700_100_000)
+        let now = Date(timeIntervalSince1970: 1_781_770_000)
 
-        let summary = try CodexUsageAPIClient.summarizeAnalytics(
-            data: json,
-            workspaceID: "org_1",
-            start: start,
-            end: end
-        )
-
-        XCTAssertEqual(summary.credits, 3.5)
-        XCTAssertEqual(summary.threads, 3)
-        XCTAssertEqual(summary.turns, 8)
-        XCTAssertEqual(summary.inputTokens, 150)
-        XCTAssertEqual(summary.cachedInputTokens, 30)
-        XCTAssertEqual(summary.outputTokens, 35)
-        XCTAssertEqual(summary.totalTokens, 215)
-    }
-
-    func testCodexRateLimitSnapshotParsing() throws {
-        let line = """
-        {"timestamp":"2026-06-17T01:02:03.000Z","type":"event_msg","payload":{"type":"token_count"},"rate_limits":{"primary":{"used_percent":31.0,"window_minutes":300,"resets_at":1780909040},"secondary":{"used_percent":15.0,"window_minutes":10080,"resets_at":1781143210},"credits":null,"plan_type":"prolite"}}
-        """
-
-        let summary = try XCTUnwrap(CodexLocalUsageStore.parseRateLimitLine(line))
-        XCTAssertEqual(summary.source, "Codex rate limit snapshot")
-        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 31.0)
-        XCTAssertEqual(summary.primaryRateLimit?.windowMinutes, 300)
-        XCTAssertEqual(summary.primaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_780_909_040)
-        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 15.0)
-        XCTAssertEqual(summary.secondaryRateLimit?.windowMinutes, 10_080)
-        XCTAssertEqual(summary.secondaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_781_143_210)
-        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
-    }
-
-    func testCodexStatusRateLimitLogParsing() throws {
-        let body = """
-        Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"allowed":true,"limit_reached":false,"primary":{"used_percent":27,"window_minutes":300,"reset_after_seconds":1437,"reset_at":1781672408},"secondary":{"used_percent":76,"window_minutes":10080,"reset_after_seconds":77038,"reset_at":1781748009}},"additional_rate_limits":{"GPT-5.3-Codex-Spark":{"allowed":true,"limit_reached":false,"primary":{"used_percent":3,"window_minutes":300,"reset_after_seconds":18000,"reset_at":1781688972},"secondary":{"used_percent":0,"window_minutes":10080,"reset_after_seconds":604800,"reset_at":1782275772}}},"credits":null,"promo":null}
-        """
-        let timestamp = Date(timeIntervalSince1970: 1_781_672_000)
-
-        let summary = try XCTUnwrap(CodexLocalUsageStore.parseStatusLogBody(body, timestamp: timestamp))
+        let summary = try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: "acct_1", now: now)
         XCTAssertEqual(summary.source, "Codex /status")
-        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 27)
-        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 76)
+        XCTAssertEqual(summary.workspaceID, "acct_1")
+        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 5)
+        XCTAssertEqual(summary.primaryRateLimit?.windowMinutes, 300)        // 18000s → 300m
+        XCTAssertEqual(summary.primaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_781_785_217)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 3)
+        XCTAssertEqual(summary.secondaryRateLimit?.windowMinutes, 10_080)   // 604800s → 10080m
         let additional = try XCTUnwrap(summary.additionalRateLimits.first)
         XCTAssertEqual(additional.name, "GPT-5.3-Codex-Spark")
-        XCTAssertEqual(additional.primary?.usedPercent, 3)
+        XCTAssertEqual(additional.primary?.usedPercent, 7)
         XCTAssertEqual(additional.primary?.windowMinutes, 300)
-        XCTAssertEqual(additional.primary?.resetsAt?.timeIntervalSince1970, 1_781_688_972)
         XCTAssertEqual(additional.secondary?.usedPercent, 0)
-        XCTAssertEqual(additional.secondary?.windowMinutes, 10_080)
-        XCTAssertEqual(additional.secondary?.resetsAt?.timeIntervalSince1970, 1_782_275_772)
-        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
+        XCTAssertNil(summary.credits)                                       // has_credits=false → hidden
+        XCTAssertEqual(summary.periodEnd, now)
     }
 
-    func testCodexStatusRateLimitLogParsingSkipsTelemetryBraces() throws {
-        let body = """
-        session_loop{thread_id=abc}:turn{model=gpt-5.5}: websocket event: {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"allowed":true,"limit_reached":false,"primary":{"used_percent":4,"window_minutes":300,"reset_after_seconds":16275,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_after_seconds":73873,"reset_at":1781748009}},"additional_rate_limits":{},"credits":null,"promo":null}
-        """
-        let timestamp = Date(timeIntervalSince1970: 1_781_700_000)
-
-        let summary = try XCTUnwrap(CodexLocalUsageStore.parseStatusLogBody(body, timestamp: timestamp))
-        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 4)
-        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 78)
-        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
-    }
-
-    func testCodexStatusSummaryChoosesNewestLogDatabase() throws {
-        let oldDB = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("sqlite")
-        let newDB = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("sqlite")
-        defer {
-            try? FileManager.default.removeItem(at: oldDB)
-            try? FileManager.default.removeItem(at: newDB)
+    func testCodexWhamUsageSurfacesPurchasedCredits() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": { "primary_window": { "used_percent": 10, "limit_window_seconds": 18000, "reset_at": 1781785217 } },
+          "credits": { "has_credits": true, "unlimited": false, "balance": "820.69" }
         }
+        """.data(using: .utf8)!
 
-        try Self.makeCodexLogDB(
-            at: oldDB,
-            timestamp: 1_781_672_000,
-            body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":27,"window_minutes":300,"reset_at":1781672408},"secondary":{"used_percent":76,"window_minutes":10080,"reset_at":1781748009}}}"#
-        )
-        try Self.makeCodexLogDB(
-            at: newDB,
-            timestamp: 1_781_700_000,
-            body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":4,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_at":1781748009}}}"#
-        )
-
-        let summary = try CodexLocalUsageStore.loadStatusSummary(logsURLs: [oldDB, newDB])
-        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 4)
-        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 78)
-        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
+        let summary = try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: nil, now: Date())
+        XCTAssertEqual(summary.credits ?? 0, 820.69, accuracy: 0.001)
     }
 
-    func testCodexStatusSummaryKeepsHighestUsageInSameWindow() throws {
-        let db = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("sqlite")
-        defer { try? FileManager.default.removeItem(at: db) }
-
-        try Self.makeCodexLogDB(
-            at: db,
-            entries: [
-                (
-                    timestamp: 1_781_700_000,
-                    body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":8,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":79,"window_minutes":10080,"reset_at":1781748009}}}"#
-                ),
-                (
-                    timestamp: 1_781_700_020,
-                    body: #"Received message {"type":"codex.rate_limits","plan_type":"prolite","rate_limits":{"primary":{"used_percent":4,"window_minutes":300,"reset_at":1781690411},"secondary":{"used_percent":78,"window_minutes":10080,"reset_at":1781748009}}}"#
-                )
-            ]
-        )
-
-        let summary = try CodexLocalUsageStore.loadStatusSummary(logsURL: db)
-        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 8)
-        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 79)
-        XCTAssertEqual(summary.periodEnd?.timeIntervalSince1970, 1_781_700_000)
+    func testCodexWhamUsageRejectsEmptyPayload() {
+        let json = #"{ "plan_type": "plus" }"#.data(using: .utf8)!
+        XCTAssertThrowsError(try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: nil, now: Date()))
     }
 
     func testFractionClamping() {
@@ -373,27 +301,5 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertEqual(decoded.weeklyAll.utilization, 11)
         XCTAssertEqual(decoded.extra?.usedCredits, 3.5)
         XCTAssertEqual(decoded.planLabel, "Max (20x)")
-    }
-
-    private static func makeCodexLogDB(at url: URL, timestamp: Int64, body: String) throws {
-        try makeCodexLogDB(at: url, entries: [(timestamp: timestamp, body: body)])
-    }
-
-    private static func makeCodexLogDB(at url: URL, entries: [(timestamp: Int64, body: String)]) throws {
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-
-        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE logs (ts INTEGER, ts_nanos INTEGER, feedback_log_body TEXT)", nil, nil, nil), SQLITE_OK)
-        for (index, entry) in entries.enumerated() {
-            var stmt: OpaquePointer?
-            XCTAssertEqual(sqlite3_prepare_v2(db, "INSERT INTO logs (ts, ts_nanos, feedback_log_body) VALUES (?, ?, ?)", -1, &stmt, nil), SQLITE_OK)
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_int64(stmt, 1, entry.timestamp)
-            sqlite3_bind_int64(stmt, 2, Int64(index))
-            let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-            sqlite3_bind_text(stmt, 3, entry.body, -1, transient)
-            XCTAssertEqual(sqlite3_step(stmt), SQLITE_DONE)
-        }
     }
 }

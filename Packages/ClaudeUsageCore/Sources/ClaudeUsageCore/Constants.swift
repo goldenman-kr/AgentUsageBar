@@ -24,15 +24,21 @@ public enum ClaudeAPI {
 }
 
 public enum CodexAuth {
-    public static let userAgent = "codex-usage-bar/1.0"
+    /// User-Agent mirrors the Codex CLI so the backend behaves identically.
+    public static let userAgent = "codex_cli_rs (external, agent-usage-bar)"
 
     public static func defaultAuthFileURL() -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".codex/auth.json")
     }
 
-    public static func analyticsUsageURL(workspaceID: String) -> URL {
-        URL(string: "https://api.chatgpt.com/v1/analytics/codex/workspaces/\(workspaceID)/usage")!
+    /// `GET` — the same rate-limit endpoint the Codex CLI's TUI `/status` card
+    /// reads. Returns the live 5-hour / weekly windows, per-model limits, plan
+    /// type and credit balance. Authenticated with the ChatGPT OAuth
+    /// `access_token` from `~/.codex/auth.json` plus the `ChatGPT-Account-Id`
+    /// header. Reverse-engineered from `openai/codex` (`backend-client`).
+    public static func usageURL() -> URL {
+        URL(string: "https://chatgpt.com/backend-api/wham/usage")!
     }
 }
 
