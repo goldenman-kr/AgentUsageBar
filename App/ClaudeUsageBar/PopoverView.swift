@@ -141,14 +141,24 @@ struct PopoverView: View {
                     MetricRow(
                         title: "5시간 한도",
                         metric: primary.metric,
-                        caption: ResetFormatter.relative(primary.resetsAt)
+                        caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
+                        timeProgress: MetricRow.TimeProgress(
+                            windowMinutes: primary.windowMinutes,
+                            resetsAt: primary.resetsAt,
+                            now: model.now
+                        )
                     )
                 }
                 if let secondary = codex.secondaryRateLimit {
                     MetricRow(
                         title: "주간 한도",
                         metric: secondary.metric,
-                        caption: ResetFormatter.absolute(secondary.resetsAt)
+                        caption: ResetFormatter.absolute(secondary.resetsAt),
+                        timeProgress: MetricRow.TimeProgress(
+                            windowMinutes: secondary.windowMinutes,
+                            resetsAt: secondary.resetsAt,
+                            now: model.now
+                        )
                     )
                 }
                 ForEach(codex.additionalRateLimits) { limit in
@@ -156,14 +166,24 @@ struct PopoverView: View {
                         MetricRow(
                             title: "\(limit.name) · 5시간",
                             metric: primary.metric,
-                            caption: ResetFormatter.relative(primary.resetsAt)
+                            caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
+                            timeProgress: MetricRow.TimeProgress(
+                                windowMinutes: primary.windowMinutes,
+                                resetsAt: primary.resetsAt,
+                                now: model.now
+                            )
                         )
                     }
                     if let secondary = limit.secondary {
                         MetricRow(
                             title: "\(limit.name) · 주간",
                             metric: secondary.metric,
-                            caption: ResetFormatter.absolute(secondary.resetsAt)
+                            caption: ResetFormatter.absolute(secondary.resetsAt),
+                            timeProgress: MetricRow.TimeProgress(
+                                windowMinutes: secondary.windowMinutes,
+                                resetsAt: secondary.resetsAt,
+                                now: model.now
+                            )
                         )
                     }
                 }
