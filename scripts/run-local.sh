@@ -13,12 +13,12 @@ echo "▶︎ Building (unsigned)…"
 xcodebuild -project ClaudeUsage.xcodeproj -scheme ClaudeUsageBar -configuration Debug \
     -derivedDataPath build CODE_SIGNING_ALLOWED=NO build >/dev/null
 
-APP="build/Build/Products/Debug/ClaudeUsageBar.app"
+APP="build/Build/Products/Debug/AgentUsageBar.app"
 echo "▶︎ Ad-hoc signing…"
-codesign --force -s - "$APP/Contents/PlugIns/ClaudeUsageWidget.appex" 2>/dev/null || true
+codesign --force -s - "$APP/Contents/PlugIns/AgentUsageWidget.appex" 2>/dev/null || true
 codesign --force -s - "$APP"
 
 echo "▶︎ Launching menu-bar app (look for the gauge in your menu bar; no Dock icon)."
 echo "   First launch may prompt for Keychain access → choose “항상 허용 / Always Allow”."
-echo "   Quit from the popover’s “종료” button, or: pkill -f ClaudeUsageBar"
+echo "   Quit from the popover’s “종료” button, or: pkill -f AgentUsageBar"
 open "$APP"

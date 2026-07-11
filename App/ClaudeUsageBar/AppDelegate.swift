@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.67percent",
-                                   accessibilityDescription: "Claude 사용량")
+                                   accessibilityDescription: "AI 사용량")
             button.image?.isTemplate = true
             button.imagePosition = .imageLeading
             button.title = " ––"
@@ -29,8 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover.behavior = .transient
-        popover.animates = true
+        popover.animates = false
         let hosting = NSHostingController(rootView: PopoverView(model: model))
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         // Report the SwiftUI content's true size to the popover. Without this the
         // hosting controller can over-report its height, making NSPopover think it
         // won't fit below the menu bar and flip it *above* — clipping the header
@@ -89,8 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPopover(from button: NSStatusBarButton) {
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         Task { await model.refresh() }
         // `.transient` behavior dismisses the popover on any outside interaction,
         // so no manual global event monitor is needed (and none to leak).

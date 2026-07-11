@@ -77,6 +77,22 @@ public struct ProfileResponse: Codable, Sendable {
 
 // MARK: - Snapshot (persisted + rendered)
 
+public enum UsageProvider: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
+    case claude
+    case codex
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        }
+    }
+
+    public var title: String { "\(displayName) 사용량" }
+}
+
 /// A single usage metric ready for display.
 public struct Metric: Codable, Sendable, Equatable {
     /// 0–100.
@@ -107,10 +123,146 @@ public struct ExtraInfo: Codable, Sendable, Equatable {
     }
 }
 
+/// Codex exposes rate-limit buckets similar to `/status`: account-wide
+/// 5-hour/weekly limits plus optional model-specific limits.
+public struct CodexUsageSummary: Codable, Sendable, Equatable {
+    public struct RateLimit: Codable, Sendable, Equatable {
+        public let usedPercent: Double
+        public let windowMinutes: Int?
+        public let resetsAt: Date?
+
+        public init(usedPercent: Double, windowMinutes: Int?, resetsAt: Date?) {
+            self.usedPercent = usedPercent
+            self.windowMinutes = windowMinutes
+            self.resetsAt = resetsAt
+        }
+
+        public var metric: Metric {
+            Metric(utilization: usedPercent, resetsAt: resetsAt)
+        }
+    }
+
+    public struct NamedRateLimit: Codable, Sendable, Equatable, Identifiable {
+        public let name: String
+        public let primary: RateLimit?
+        public let secondary: RateLimit?
+
+        public init(name: String, primary: RateLimit?, secondary: RateLimit?) {
+            self.name = name
+            self.primary = primary
+            self.secondary = secondary
+        }
+
+        public var id: String { name }
+    }
+
+    public let source: String
+    public let workspaceID: String?
+    public let periodStart: Date?
+    public let periodEnd: Date?
+    public let primaryRateLimit: RateLimit?
+    public let secondaryRateLimit: RateLimit?
+    public let additionalRateLimits: [NamedRateLimit]
+    public let rateLimitPlanType: String?
+    public let credits: Double?
+    public let threads: Int?
+    public let turns: Int?
+    public let inputTokens: Int?
+    public let cachedInputTokens: Int?
+    public let outputTokens: Int?
+    public let limitCredits: Double?
+
+    public init(
+        source: String,
+        workspaceID: String?,
+        periodStart: Date?,
+        periodEnd: Date?,
+        primaryRateLimit: RateLimit? = nil,
+        secondaryRateLimit: RateLimit? = nil,
+        additionalRateLimits: [NamedRateLimit] = [],
+        rateLimitPlanType: String? = nil,
+        credits: Double?,
+        threads: Int?,
+        turns: Int?,
+        inputTokens: Int?,
+        cachedInputTokens: Int?,
+        outputTokens: Int?,
+        limitCredits: Double? = nil
+    ) {
+        self.source = source
+        self.workspaceID = workspaceID
+        self.periodStart = periodStart
+        self.periodEnd = periodEnd
+        self.primaryRateLimit = primaryRateLimit
+        self.secondaryRateLimit = secondaryRateLimit
+        self.additionalRateLimits = additionalRateLimits
+        self.rateLimitPlanType = rateLimitPlanType
+        self.credits = credits
+        self.threads = threads
+        self.turns = turns
+        self.inputTokens = inputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.outputTokens = outputTokens
+        self.limitCredits = limitCredits
+    }
+
+    public var totalTokens: Int? {
+        let total = (inputTokens ?? 0) + (cachedInputTokens ?? 0) + (outputTokens ?? 0)
+        return total > 0 ? total : nil
+    }
+
+    public var creditMetric: Metric? {
+        guard let credits, let limitCredits, limitCredits > 0 else { return nil }
+        return Metric(utilization: credits / limitCredits * 100, resetsAt: periodEnd)
+    }
+
+    public var bestPrimaryMetric: Metric? {
+        primaryRateLimit?.metric ?? creditMetric
+    }
+
+    public var bestSecondaryMetric: Metric? {
+        secondaryRateLimit?.metric
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case source, workspaceID, periodStart, periodEnd, primaryRateLimit, secondaryRateLimit
+        case additionalRateLimits, rateLimitPlanType, credits, threads, turns, inputTokens
+        case cachedInputTokens, outputTokens, limitCredits
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decode(String.self, forKey: .source)
+        workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+        periodStart = try c.decodeIfPresent(Date.self, forKey: .periodStart)
+        periodEnd = try c.decodeIfPresent(Date.self, forKey: .periodEnd)
+        primaryRateLimit = try c.decodeIfPresent(RateLimit.self, forKey: .primaryRateLimit)
+        secondaryRateLimit = try c.decodeIfPresent(RateLimit.self, forKey: .secondaryRateLimit)
+        if let named = try c.decodeIfPresent([NamedRateLimit].self, forKey: .additionalRateLimits) {
+            additionalRateLimits = named
+        } else if let legacy = try c.decodeIfPresent([String: RateLimit].self, forKey: .additionalRateLimits) {
+            additionalRateLimits = legacy
+                .map { NamedRateLimit(name: $0.key, primary: $0.value, secondary: nil) }
+                .sorted { $0.name < $1.name }
+        } else {
+            additionalRateLimits = []
+        }
+        rateLimitPlanType = try c.decodeIfPresent(String.self, forKey: .rateLimitPlanType)
+        credits = try c.decodeIfPresent(Double.self, forKey: .credits)
+        threads = try c.decodeIfPresent(Int.self, forKey: .threads)
+        turns = try c.decodeIfPresent(Int.self, forKey: .turns)
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens)
+        cachedInputTokens = try c.decodeIfPresent(Int.self, forKey: .cachedInputTokens)
+        outputTokens = try c.decodeIfPresent(Int.self, forKey: .outputTokens)
+        limitCredits = try c.decodeIfPresent(Double.self, forKey: .limitCredits)
+    }
+}
+
 /// The fully-resolved snapshot the menu-bar app fetches, persists to the App
 /// Group container, and that the widget renders. Keeping the widget on a flat
 /// persisted snapshot means the widget never needs network or Keychain access.
 public struct UsageSnapshot: Codable, Sendable, Equatable {
+    public let provider: UsageProvider
     public let fetchedAt: Date
     public let planLabel: String
     public let session: Metric
@@ -118,11 +270,13 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
     public let weeklySonnet: Metric?
     public let weeklyOpus: Metric?
     public let extra: ExtraInfo?
+    public let codex: CodexUsageSummary?
     /// Non-nil when the most recent refresh failed; lets the UI show a reason
     /// while still rendering the last-known good numbers.
     public let errorMessage: String?
 
     public init(
+        provider: UsageProvider = .claude,
         fetchedAt: Date,
         planLabel: String,
         session: Metric,
@@ -130,8 +284,10 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         weeklySonnet: Metric?,
         weeklyOpus: Metric?,
         extra: ExtraInfo?,
+        codex: CodexUsageSummary? = nil,
         errorMessage: String? = nil
     ) {
+        self.provider = provider
         self.fetchedAt = fetchedAt
         self.planLabel = planLabel
         self.session = session
@@ -139,11 +295,13 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         self.weeklySonnet = weeklySonnet
         self.weeklyOpus = weeklyOpus
         self.extra = extra
+        self.codex = codex
         self.errorMessage = errorMessage
     }
 
     /// Builds a display snapshot from the raw API response.
     public init(usage: UsageResponse, planLabel: String, fetchedAt: Date) {
+        self.provider = .claude
         self.fetchedAt = fetchedAt
         self.planLabel = planLabel
         self.session = Metric(
@@ -170,6 +328,21 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         } else {
             self.extra = nil
         }
+        self.codex = nil
+        self.errorMessage = nil
+    }
+
+    public init(codex: CodexUsageSummary, planLabel: String, fetchedAt: Date) {
+        self.provider = .codex
+        self.fetchedAt = fetchedAt
+        self.planLabel = CodexPlanLabel.from(planType: codex.rateLimitPlanType) == "Codex" ? planLabel : CodexPlanLabel.from(planType: codex.rateLimitPlanType)
+        let primary = codex.bestPrimaryMetric ?? Metric(utilization: 0, resetsAt: codex.periodEnd)
+        self.session = primary
+        self.weeklyAll = codex.bestSecondaryMetric ?? primary
+        self.weeklySonnet = nil
+        self.weeklyOpus = nil
+        self.extra = nil
+        self.codex = codex
         self.errorMessage = nil
     }
 
@@ -177,6 +350,7 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
     /// we still have prior numbers, or as a zeroed placeholder).
     public func withError(_ message: String) -> UsageSnapshot {
         UsageSnapshot(
+            provider: provider,
             fetchedAt: fetchedAt,
             planLabel: planLabel,
             session: session,
@@ -184,22 +358,47 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
             weeklySonnet: weeklySonnet,
             weeklyOpus: weeklyOpus,
             extra: extra,
+            codex: codex,
             errorMessage: message
         )
     }
 
     /// Placeholder shown before the first successful fetch (and in widget previews).
-    public static func placeholder(planLabel: String = "Claude", error: String? = nil) -> UsageSnapshot {
+    public static func placeholder(
+        provider: UsageProvider = .claude,
+        planLabel: String? = nil,
+        error: String? = nil
+    ) -> UsageSnapshot {
         UsageSnapshot(
+            provider: provider,
             fetchedAt: Date(timeIntervalSince1970: 0),
-            planLabel: planLabel,
+            planLabel: planLabel ?? provider.displayName,
             session: Metric(utilization: 0, resetsAt: nil),
             weeklyAll: Metric(utilization: 0, resetsAt: nil),
             weeklySonnet: Metric(utilization: 0, resetsAt: nil),
             weeklyOpus: nil,
             extra: nil,
+            codex: nil,
             errorMessage: error
         )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, fetchedAt, planLabel, session, weeklyAll, weeklySonnet, weeklyOpus, extra, codex, errorMessage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decodeIfPresent(UsageProvider.self, forKey: .provider) ?? .claude
+        fetchedAt = try c.decode(Date.self, forKey: .fetchedAt)
+        planLabel = try c.decode(String.self, forKey: .planLabel)
+        session = try c.decode(Metric.self, forKey: .session)
+        weeklyAll = try c.decode(Metric.self, forKey: .weeklyAll)
+        weeklySonnet = try c.decodeIfPresent(Metric.self, forKey: .weeklySonnet)
+        weeklyOpus = try c.decodeIfPresent(Metric.self, forKey: .weeklyOpus)
+        extra = try c.decodeIfPresent(ExtraInfo.self, forKey: .extra)
+        codex = try c.decodeIfPresent(CodexUsageSummary.self, forKey: .codex)
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
     }
 }
 
@@ -216,7 +415,7 @@ public enum UsageError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .tokenNotFound:
-            return "Claude 인증 토큰을 찾을 수 없습니다. Claude Code 또는 데스크톱 앱에 로그인하세요."
+            return "인증 토큰을 찾을 수 없습니다. 선택한 도구에 먼저 로그인하세요."
         case .tokenExpired:
             return "토큰이 만료되었습니다. Claude Code 실행 시 자동으로 갱신됩니다."
         case .rateLimited(let retryAfter):

@@ -14,13 +14,19 @@ struct PopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            providerPicker
 
             if let snap = snapshot, hasData {
                 planRow(snap)
                 Divider()
-                sessionSection(snap)
-                weeklySection(snap)
-                if let extra = snap.extra { extraSection(extra) }
+                switch snap.provider {
+                case .claude:
+                    sessionSection(snap)
+                    weeklySection(snap)
+                    if let extra = snap.extra { extraSection(extra) }
+                case .codex:
+                    codexSection(snap)
+                }
             } else {
                 placeholder
             }
@@ -30,6 +36,7 @@ struct PopoverView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: Header
@@ -39,13 +46,23 @@ struct PopoverView: View {
             Image(systemName: "gauge.with.dots.needle.67percent")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.tint)
-            Text("Claude 사용량")
+            Text(model.selectedProvider.title)
                 .font(.system(size: 15, weight: .bold))
             Spacer()
             if model.isRefreshing {
                 ProgressView().controlSize(.small)
             }
         }
+    }
+
+    private var providerPicker: some View {
+        Picker("조회 대상", selection: $model.selectedProvider) {
+            ForEach(UsageProvider.allCases) { provider in
+                Text(provider.displayName).tag(provider)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private func planRow(_ snap: UsageSnapshot) -> some View {
@@ -117,6 +134,101 @@ struct PopoverView: View {
         }
     }
 
+    private func codexSection(_ snap: UsageSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let codex = snap.codex {
+                if let primary = codex.primaryRateLimit {
+                    MetricRow(
+                        title: "5시간 한도",
+                        metric: primary.metric,
+                        caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
+                        timeProgress: MetricRow.TimeProgress(
+                            windowMinutes: primary.windowMinutes,
+                            resetsAt: primary.resetsAt,
+                            now: model.now
+                        )
+                    )
+                }
+                if let secondary = codex.secondaryRateLimit {
+                    MetricRow(
+                        title: "주간 한도",
+                        metric: secondary.metric,
+                        caption: ResetFormatter.absolute(secondary.resetsAt),
+                        timeProgress: MetricRow.TimeProgress(
+                            windowMinutes: secondary.windowMinutes,
+                            resetsAt: secondary.resetsAt,
+                            now: model.now
+                        )
+                    )
+                }
+                ForEach(codex.additionalRateLimits) { limit in
+                    if let primary = limit.primary {
+                        MetricRow(
+                            title: "\(limit.name) · 5시간",
+                            metric: primary.metric,
+                            caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
+                            timeProgress: MetricRow.TimeProgress(
+                                windowMinutes: primary.windowMinutes,
+                                resetsAt: primary.resetsAt,
+                                now: model.now
+                            )
+                        )
+                    }
+                    if let secondary = limit.secondary {
+                        MetricRow(
+                            title: "\(limit.name) · 주간",
+                            metric: secondary.metric,
+                            caption: ResetFormatter.absolute(secondary.resetsAt),
+                            timeProgress: MetricRow.TimeProgress(
+                                windowMinutes: secondary.windowMinutes,
+                                resetsAt: secondary.resetsAt,
+                                now: model.now
+                            )
+                        )
+                    }
+                }
+                if codex.primaryRateLimit == nil, let metric = codex.creditMetric {
+                    MetricRow(
+                        title: "크레딧",
+                        metric: metric,
+                        caption: ResetFormatter.absolute(metric.resetsAt)
+                    )
+                } else if let credits = codex.credits {
+                    valueRow("크레딧", String(format: "%.2f", credits))
+                }
+                Text(sourceCaption(codex.source))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            } else {
+                Text("Codex 사용량 데이터가 아직 없습니다")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func sourceCaption(_ source: String) -> String {
+        switch source {
+        case "Codex /status":
+            return "Codex /status 기준"
+        default:
+            return source
+        }
+    }
+
+    private func valueRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
     private var placeholder: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let err = model.statusError {
@@ -168,7 +280,7 @@ struct PopoverView: View {
 
             HStack {
                 Button("사용량 페이지 열기") {
-                    if let url = URL(string: "https://claude.ai/settings/usage") {
+                    if let url = usagePageURL {
                         NSWorkspace.shared.open(url)
                     }
                 }
@@ -178,6 +290,15 @@ struct PopoverView: View {
                     .font(.system(size: 12))
             }
             .buttonStyle(.link)
+        }
+    }
+
+    private var usagePageURL: URL? {
+        switch model.selectedProvider {
+        case .claude:
+            return URL(string: "https://claude.ai/settings/usage")
+        case .codex:
+            return URL(string: "https://chatgpt.com/codex")
         }
     }
 }

@@ -15,6 +15,9 @@ public enum UsagePalette {
 
     /// Subtle track color behind the fill.
     public static var track: Color { Color.primary.opacity(0.12) }
+
+    /// Time-window progress fill. Distinct from usage so the two bars scan apart.
+    public static var timeElapsed: Color { Color.green }
 }
 
 /// A rounded progress meter matching the desktop app's thin usage bars.

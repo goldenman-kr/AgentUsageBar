@@ -19,9 +19,9 @@ xcodebuild -project ClaudeUsage.xcodeproj -scheme ClaudeUsageBar -configuration 
     -allowProvisioningUpdates \
     build
 
-APP="build/Build/Products/$CONFIG/ClaudeUsageBar.app"
+APP="build/Build/Products/$CONFIG/AgentUsageBar.app"
 echo
 echo "✓ Built: $APP"
-echo "  Install:  cp -R \"$APP\" /Applications/  &&  open /Applications/ClaudeUsageBar.app"
-echo "  Then add the widget: Notification Center → 위젯 편집 → Claude 사용량,"
+echo "  Install:  cp -R \"$APP\" /Applications/  &&  open /Applications/AgentUsageBar.app"
+echo "  Then add the widget: Notification Center → 위젯 편집 → AgentUsageBar,"
 echo "  or right-click the desktop → 위젯 편집."

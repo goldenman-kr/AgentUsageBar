@@ -23,6 +23,25 @@ public enum ClaudeAPI {
     public static let userAgent = "claude-cli/2.1.177 (external, claude-usage-widget)"
 }
 
+public enum CodexAuth {
+    /// User-Agent mirrors the Codex CLI so the backend behaves identically.
+    public static let userAgent = "codex_cli_rs (external, agent-usage-bar)"
+
+    public static func defaultAuthFileURL() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".codex/auth.json")
+    }
+
+    /// `GET` — the same rate-limit endpoint the Codex CLI's TUI `/status` card
+    /// reads. Returns the live 5-hour / weekly windows, per-model limits, plan
+    /// type and credit balance. Authenticated with the ChatGPT OAuth
+    /// `access_token` from `~/.codex/auth.json` plus the `ChatGPT-Account-Id`
+    /// header. Reverse-engineered from `openai/codex` (`backend-client`).
+    public static func usageURL() -> URL {
+        URL(string: "https://chatgpt.com/backend-api/wham/usage")!
+    }
+}
+
 /// Identifiers shared between the menu-bar app and the WidgetKit extension.
 public enum AppGroup {
     /// Info.plist key holding the real App Group id. Both targets set it via a

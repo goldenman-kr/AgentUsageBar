@@ -31,6 +31,62 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertThrowsError(try KeychainTokenStore.decodeToken(from: json))
     }
 
+    func testDecodeCodexAuthToken() throws {
+        let payload = #"{"exp":1900000000,"https://api.openai.com/auth":{"chatgpt_account_id":"acct_1","chatgpt_plan_type":"plus","organizations":[{"id":"org_1","is_default":true}]},"https://api.openai.com/profile":{"email":"user@example.com"}}"#
+        let encodedPayload = Data(payload.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let jwt = "header.\(encodedPayload).signature"
+        let json = """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "access_token": "\(jwt)",
+            "account_id": "acct_1",
+            "refresh_token": "refresh"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let token = try CodexAuthStore.decodeToken(from: json)
+        XCTAssertEqual(token.accessToken, jwt)
+        XCTAssertEqual(token.accountID, "acct_1")
+        XCTAssertEqual(token.workspaceID, "acct_1")
+        XCTAssertEqual(token.planType, "plus")
+        XCTAssertEqual(token.email, "user@example.com")
+        XCTAssertEqual(token.expiresAt?.timeIntervalSince1970, 1_900_000_000)
+    }
+
+    func testDecodeCodexAuthTokenReadsWorkspaceFromIDToken() throws {
+        let accessPayload = #"{"exp":1900000000,"https://api.openai.com/auth":{"chatgpt_account_id":"acct_1","chatgpt_plan_type":"plus"},"https://api.openai.com/profile":{"email":"user@example.com"}}"#
+        let idPayload = #"{"https://api.openai.com/auth":{"organizations":[{"id":"org_from_id","is_default":true}]}}"#
+        let accessJWT = "header.\(Self.base64URL(accessPayload)).signature"
+        let idJWT = "header.\(Self.base64URL(idPayload)).signature"
+        let json = """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "access_token": "\(accessJWT)",
+            "id_token": "\(idJWT)",
+            "account_id": "acct_1"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let token = try CodexAuthStore.decodeToken(from: json)
+        XCTAssertEqual(token.workspaceID, "acct_1")
+        XCTAssertEqual(token.planType, "plus")
+        XCTAssertEqual(token.email, "user@example.com")
+    }
+
+    private static func base64URL(_ string: String) -> String {
+        Data(string.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
     // MARK: ISO-8601 parsing (microsecond precision + offset)
 
     func testISO8601Microseconds() {
@@ -98,6 +154,69 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertNil(snap.weeklyOpus)
         XCTAssertNil(snap.extra)                          // disabled → dropped
         XCTAssertEqual(snap.fetchedAt, now)
+    }
+
+    // MARK: Codex usage endpoint (wham/usage — same source as TUI /status)
+
+    func testCodexWhamUsageParsing() throws {
+        let json = """
+        {
+          "plan_type": "prolite",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window":   { "used_percent": 5, "limit_window_seconds": 18000,  "reset_after_seconds": 11744, "reset_at": 1781785217 },
+            "secondary_window": { "used_percent": 3, "limit_window_seconds": 604800, "reset_after_seconds": 562543, "reset_at": 1782336016 }
+          },
+          "additional_rate_limits": [
+            {
+              "limit_name": "GPT-5.3-Codex-Spark",
+              "metered_feature": "codex_bengalfox",
+              "rate_limit": {
+                "primary_window":   { "used_percent": 7, "limit_window_seconds": 18000,  "reset_at": 1781791473 },
+                "secondary_window": { "used_percent": 0, "limit_window_seconds": 604800, "reset_at": 1782378273 }
+              }
+            }
+          ],
+          "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
+        }
+        """.data(using: .utf8)!
+        let now = Date(timeIntervalSince1970: 1_781_770_000)
+
+        let summary = try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: "acct_1", now: now)
+        XCTAssertEqual(summary.source, "Codex /status")
+        XCTAssertEqual(summary.workspaceID, "acct_1")
+        XCTAssertEqual(summary.rateLimitPlanType, "prolite")
+        XCTAssertEqual(summary.primaryRateLimit?.usedPercent, 5)
+        XCTAssertEqual(summary.primaryRateLimit?.windowMinutes, 300)        // 18000s → 300m
+        XCTAssertEqual(summary.primaryRateLimit?.resetsAt?.timeIntervalSince1970, 1_781_785_217)
+        XCTAssertEqual(summary.secondaryRateLimit?.usedPercent, 3)
+        XCTAssertEqual(summary.secondaryRateLimit?.windowMinutes, 10_080)   // 604800s → 10080m
+        let additional = try XCTUnwrap(summary.additionalRateLimits.first)
+        XCTAssertEqual(additional.name, "GPT-5.3-Codex-Spark")
+        XCTAssertEqual(additional.primary?.usedPercent, 7)
+        XCTAssertEqual(additional.primary?.windowMinutes, 300)
+        XCTAssertEqual(additional.secondary?.usedPercent, 0)
+        XCTAssertNil(summary.credits)                                       // has_credits=false → hidden
+        XCTAssertEqual(summary.periodEnd, now)
+    }
+
+    func testCodexWhamUsageSurfacesPurchasedCredits() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": { "primary_window": { "used_percent": 10, "limit_window_seconds": 18000, "reset_at": 1781785217 } },
+          "credits": { "has_credits": true, "unlimited": false, "balance": "820.69" }
+        }
+        """.data(using: .utf8)!
+
+        let summary = try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: nil, now: Date())
+        XCTAssertEqual(summary.credits ?? 0, 820.69, accuracy: 0.001)
+    }
+
+    func testCodexWhamUsageRejectsEmptyPayload() {
+        let json = #"{ "plan_type": "plus" }"#.data(using: .utf8)!
+        XCTAssertThrowsError(try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: nil, now: Date()))
     }
 
     func testFractionClamping() {
