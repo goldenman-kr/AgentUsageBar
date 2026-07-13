@@ -149,7 +149,8 @@ final class UsageViewModel: ObservableObject {
         guard let snap = snapshot, snap.fetchedAt.timeIntervalSince1970 > 0 else { return "––" }
         if snap.provider == .codex, let codex = snap.codex {
             if codex.primaryRateLimit != nil || codex.secondaryRateLimit != nil {
-                return "\(Int(snap.session.utilization.rounded()))% · \(Int(snap.weeklyAll.utilization.rounded()))%"
+                let metric = codex.secondaryRateLimit?.metric ?? codex.primaryRateLimit?.metric ?? snap.weeklyAll
+                return "\(Int(metric.utilization.rounded()))%"
             }
             if let credits = codex.credits {
                 return String(format: "%.1f cr", credits)
