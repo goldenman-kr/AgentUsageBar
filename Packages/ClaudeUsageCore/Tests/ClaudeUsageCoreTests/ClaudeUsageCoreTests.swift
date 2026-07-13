@@ -219,6 +219,21 @@ final class ClaudeUsageCoreTests: XCTestCase {
         XCTAssertThrowsError(try CodexUsageAPIClient.parseUsagePayload(data: json, accountID: nil, now: Date()))
     }
 
+    func testCodexRateLimitInfersWindowLabelsFromDuration() {
+        XCTAssertEqual(
+            CodexUsageSummary.RateLimit(usedPercent: 8, windowMinutes: 300, resetsAt: nil).inferredWindowLabel,
+            "5시간"
+        )
+        XCTAssertEqual(
+            CodexUsageSummary.RateLimit(usedPercent: 8, windowMinutes: 10_080, resetsAt: nil).inferredWindowLabel,
+            "주간"
+        )
+        XCTAssertEqual(
+            CodexUsageSummary.RateLimit(usedPercent: 8, windowMinutes: 1_440, resetsAt: nil).inferredWindowLabel,
+            "1일"
+        )
+    }
+
     func testFractionClamping() {
         XCTAssertEqual(Metric(utilization: 150, resetsAt: nil).fraction, 1.0)
         XCTAssertEqual(Metric(utilization: -5, resetsAt: nil).fraction, 0.0)

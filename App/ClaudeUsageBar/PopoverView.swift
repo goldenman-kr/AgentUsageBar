@@ -137,53 +137,35 @@ struct PopoverView: View {
     private func codexSection(_ snap: UsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if let codex = snap.codex {
+                let hasSecondaryLimit = codex.secondaryRateLimit != nil
                 if let primary = codex.primaryRateLimit {
-                    MetricRow(
-                        title: "5시간 한도",
-                        metric: primary.metric,
-                        caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
-                        timeProgress: MetricRow.TimeProgress(
-                            windowMinutes: primary.windowMinutes,
-                            resetsAt: primary.resetsAt,
-                            now: model.now
-                        )
+                    codexLimitRow(
+                        titlePrefix: nil,
+                        limit: primary,
+                        fallbackLabel: hasSecondaryLimit ? "5시간" : "주간"
                     )
                 }
                 if let secondary = codex.secondaryRateLimit {
-                    MetricRow(
-                        title: "주간 한도",
-                        metric: secondary.metric,
-                        caption: ResetFormatter.absolute(secondary.resetsAt),
-                        timeProgress: MetricRow.TimeProgress(
-                            windowMinutes: secondary.windowMinutes,
-                            resetsAt: secondary.resetsAt,
-                            now: model.now
-                        )
+                    codexLimitRow(
+                        titlePrefix: nil,
+                        limit: secondary,
+                        fallbackLabel: "주간"
                     )
                 }
                 ForEach(codex.additionalRateLimits) { limit in
+                    let hasSecondaryLimit = limit.secondary != nil
                     if let primary = limit.primary {
-                        MetricRow(
-                            title: "\(limit.name) · 5시간",
-                            metric: primary.metric,
-                            caption: ResetFormatter.relative(primary.resetsAt, now: model.now),
-                            timeProgress: MetricRow.TimeProgress(
-                                windowMinutes: primary.windowMinutes,
-                                resetsAt: primary.resetsAt,
-                                now: model.now
-                            )
+                        codexLimitRow(
+                            titlePrefix: limit.name,
+                            limit: primary,
+                            fallbackLabel: hasSecondaryLimit ? "5시간" : "주간"
                         )
                     }
                     if let secondary = limit.secondary {
-                        MetricRow(
-                            title: "\(limit.name) · 주간",
-                            metric: secondary.metric,
-                            caption: ResetFormatter.absolute(secondary.resetsAt),
-                            timeProgress: MetricRow.TimeProgress(
-                                windowMinutes: secondary.windowMinutes,
-                                resetsAt: secondary.resetsAt,
-                                now: model.now
-                            )
+                        codexLimitRow(
+                            titlePrefix: limit.name,
+                            limit: secondary,
+                            fallbackLabel: "주간"
                         )
                     }
                 }
@@ -206,6 +188,28 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func codexLimitRow(
+        titlePrefix: String?,
+        limit: CodexUsageSummary.RateLimit,
+        fallbackLabel: String
+    ) -> some View {
+        let label = limit.inferredWindowLabel ?? fallbackLabel
+        let title = titlePrefix.map { "\($0) · \(label)" } ?? "\(label) 한도"
+        let caption = limit.usesRelativeResetCaption
+            ? ResetFormatter.relative(limit.resetsAt, now: model.now)
+            : ResetFormatter.absolute(limit.resetsAt)
+        return MetricRow(
+            title: title,
+            metric: limit.metric,
+            caption: caption,
+            timeProgress: MetricRow.TimeProgress(
+                windowMinutes: limit.windowMinutes,
+                resetsAt: limit.resetsAt,
+                now: model.now
+            )
+        )
     }
 
     private func sourceCaption(_ source: String) -> String {

@@ -140,6 +140,25 @@ public struct CodexUsageSummary: Codable, Sendable, Equatable {
         public var metric: Metric {
             Metric(utilization: usedPercent, resetsAt: resetsAt)
         }
+
+        public var inferredWindowLabel: String? {
+            guard let windowMinutes, windowMinutes > 0 else { return nil }
+            if windowMinutes >= 7 * 24 * 60 {
+                return "주간"
+            }
+            if windowMinutes % (24 * 60) == 0 {
+                return "\(windowMinutes / (24 * 60))일"
+            }
+            if windowMinutes % 60 == 0 {
+                return "\(windowMinutes / 60)시간"
+            }
+            return "\(windowMinutes)분"
+        }
+
+        public var usesRelativeResetCaption: Bool {
+            guard let windowMinutes else { return false }
+            return windowMinutes < 24 * 60
+        }
     }
 
     public struct NamedRateLimit: Codable, Sendable, Equatable, Identifiable {
